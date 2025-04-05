@@ -25,7 +25,7 @@ const PORT = process.env.PORT || 3000;
 
 // CORS configuration
 app.use(cors({
-  origin: 'http://localhost:5173', // Your frontend URL
+  origin: 'https://astaphonicsfuns-quickjoins-projects.vercel.app/', // Your frontend URL
   methods: ['GET', 'POST'],
   credentials: true
 }));
