@@ -24,9 +24,19 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // CORS configuration
+const allowedOrigins = [
+  'https://astaphonicsfuns-quickjoins-projects.vercel.app', // ✅ NO trailing slash
+  'http://localhost:5173' // for local dev if needed
+];
+
 app.use(cors({
-  origin: 'https://astaphonicsfuns-quickjoins-projects.vercel.app/', // Your frontend URL
-  methods: ['GET', 'POST'],
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true
 }));
 
