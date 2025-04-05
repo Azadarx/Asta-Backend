@@ -33,14 +33,15 @@ app.use(cors({
 // Middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-app.use(express.static('public'));
+// app.use(express.static('public'));
 
 // MySQL Connection
 const db = mysql.createConnection({
   host: process.env.DB_HOST || 'localhost',
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'asta_education'
+  database: process.env.DB_NAME || 'asta_education',
+  port: 3306
 });
 
 db.connect((err) => {
