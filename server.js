@@ -47,14 +47,18 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 // app.use(express.static('public'));
 
+const { Pool } = pg;
+
 // PostgreSQL Connection
-const pool = new pg.Pool({
-  host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || '',
-  database: process.env.DB_NAME || 'asta_education',
+const pool = new Pool({
+  user: process.env.DB_USER,
+  host: process.env.DB_HOST,
+  database: process.env.DB_NAME,
+  password: process.env.DB_PASSWORD,
   port: process.env.DB_PORT || 5432,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
+  ssl: {
+    rejectUnauthorized: false // Required for Render PostgreSQL
+  }
 });
 
 // Test database connection
@@ -181,9 +185,9 @@ const initExcelFiles = () => {
 initExcelFiles();
 
 // Routes
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
-});
+// app.get('/', (req, res) => {
+//   res.sendFile(path.join(__dirname, 'public', 'index.html'));
+// });
 
 // Handle form submission and create Razorpay order
 app.post('/create-order', (req, res) => {
@@ -261,9 +265,9 @@ app.post('/create-order', (req, res) => {
 });
 
 // Route for payment page
-app.get('/payment', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'payment.html'));
-});
+// app.get('/payment', (req, res) => {
+//   res.sendFile(path.join(__dirname, 'public', 'payment.html'));
+// });
 
 // Verify payment and update records
 app.post('/verify-payment', async (req, res) => {
@@ -685,9 +689,9 @@ async function sendAboutInquiryEmail(aboutInquiry) {
 }
 
 // Admin dashboard route (protected - in a production app this should have proper authentication)
-app.get('/admin', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-});
+// app.get('/admin', (req, res) => {
+//   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+// });
 
 // API route to get all students
 app.get('/api/students', async (req, res) => {
