@@ -27,7 +27,7 @@ app.use(express.json());
 
 // CORS configuration
 const allowedOrigins = [
-  'https://asta-frontend-quickjoins-projects.vercel.app/', // ✅ NO trailing slash
+  'https://astaphonicsfuns-quickjoins-projects.vercel.app', // ✅ NO trailing slash
   'http://localhost:5173' // for local dev if needed
 ];
 
