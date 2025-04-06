@@ -1,7 +1,7 @@
 // Required dependencies
 import express from "express";
 import bodyParser from "body-parser";
-import mysql from "mysql2";
+import pg from "pg";
 import nodemailer from "nodemailer";
 import Razorpay from "razorpay";
 import xlsx from "xlsx";
@@ -47,86 +47,82 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
 // app.use(express.static('public'));
 
-// MySQL Connection
-const db = mysql.createConnection({
+// PostgreSQL Connection
+const pool = new pg.Pool({
   host: process.env.DB_HOST || 'localhost',
-  user: process.env.DB_USER || 'root',
+  user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'asta_education',
-  port: 3306
+  port: process.env.DB_PORT || 5432,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false
 });
 
-db.connect((err) => {
-  if (err) {
-    console.error('Error connecting to MySQL database:', err);
-    return;
+// Test database connection
+pool.connect()
+  .then(client => {
+    console.log('Connected to PostgreSQL database');
+    client.release();
+
+    // Create tables if they don't exist
+    initializeTables();
+  })
+  .catch(err => {
+    console.error('Error connecting to PostgreSQL database:', err);
+  });
+
+// Initialize database tables
+async function initializeTables() {
+  const client = await pool.connect();
+  try {
+    // Create students table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS students (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL,
+        phone VARCHAR(20) NOT NULL,
+        course VARCHAR(100) NOT NULL,
+        payment_id VARCHAR(100),
+        payment_status VARCHAR(20) DEFAULT 'successful',
+        amount DECIMAL(10,2) NOT NULL,
+        registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Students table created or already exists');
+
+    // Create contact_messages table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS contact_messages (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL,
+        phone VARCHAR(20),
+        subject VARCHAR(200) NOT NULL,
+        message TEXT NOT NULL,
+        submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Contact messages table created or already exists');
+
+    // Create about_inquiries table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS about_inquiries (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) NOT NULL,
+        subject VARCHAR(200) NOT NULL,
+        message TEXT NOT NULL,
+        submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('About inquiries table created or already exists');
+
+  } catch (err) {
+    console.error('Error initializing database tables:', err);
+  } finally {
+    client.release();
   }
-  console.log('Connected to MySQL database');
-
-  // Create students table if not exists
-  const createStudentsTableQuery = `
-    CREATE TABLE IF NOT EXISTS students (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      email VARCHAR(100) NOT NULL,
-      phone VARCHAR(20) NOT NULL,
-      course VARCHAR(100) NOT NULL,
-      payment_id VARCHAR(100),
-      payment_status VARCHAR(20) DEFAULT 'successful',
-      amount DECIMAL(10,2) NOT NULL,
-      registration_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-
-  db.query(createStudentsTableQuery, (err) => {
-    if (err) {
-      console.error('Error creating students table:', err);
-    } else {
-      console.log('Students table created or already exists');
-    }
-  });
-
-  // Create contact_messages table if not exists
-  const createContactTableQuery = `
-    CREATE TABLE IF NOT EXISTS contact_messages (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      email VARCHAR(100) NOT NULL,
-      phone VARCHAR(20),
-      subject VARCHAR(200) NOT NULL,
-      message TEXT NOT NULL,
-      submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-
-  db.query(createContactTableQuery, (err) => {
-    if (err) {
-      console.error('Error creating contact_messages table:', err);
-    } else {
-      console.log('Contact messages table created or already exists');
-    }
-  });
-
-  // Create about_inquiries table if not exists
-  const createAboutTableQuery = `
-    CREATE TABLE IF NOT EXISTS about_inquiries (
-      id INT AUTO_INCREMENT PRIMARY KEY,
-      name VARCHAR(100) NOT NULL,
-      email VARCHAR(100) NOT NULL,
-      subject VARCHAR(200) NOT NULL,
-      message TEXT NOT NULL,
-      submission_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-  `;
-
-  db.query(createAboutTableQuery, (err) => {
-    if (err) {
-      console.error('Error creating about_inquiries table:', err);
-    } else {
-      console.log('About inquiries table created or already exists');
-    }
-  });
-});
+}
 
 // Initialize Razorpay
 const razorpay = new Razorpay({
@@ -189,7 +185,6 @@ app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-// Handle form submission and create Razorpay order
 // Handle form submission and create Razorpay order
 app.post('/create-order', (req, res) => {
   const { name, email, phone, course, amount } = req.body;
@@ -271,7 +266,7 @@ app.get('/payment', (req, res) => {
 });
 
 // Verify payment and update records
-app.post('/verify-payment', (req, res) => {
+app.post('/verify-payment', async (req, res) => {
   const {
     razorpay_order_id,
     razorpay_payment_id,
@@ -293,54 +288,47 @@ app.post('/verify-payment', (req, res) => {
   // Extract student information
   const { name, email, phone, course, amount } = student_info;
 
-  // Insert student record in database AFTER successful payment
-  db.query(
-    'INSERT INTO students (name, email, phone, course, amount, payment_id, payment_status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-    [name, email, phone, course, amount, razorpay_payment_id, 'successful'],
-    async (err, result) => {
-      if (err) {
-        console.error('Error storing student data:', err);
-        return res.status(500).json({ status: 'error', message: 'Database error' });
-      }
+  const client = await pool.connect();
 
-      const student_id = result.insertId;
+  try {
+    await client.query('BEGIN');
 
-      // Get complete student details with timestamp
-      db.query(
-        'SELECT * FROM students WHERE id = ?',
-        [student_id],
-        async (err, results) => {
-          if (err || results.length === 0) {
-            console.error('Error fetching student details:', err);
-            return res.status(500).json({ status: 'error', message: 'Error fetching student details' });
-          }
+    // Insert student record in database AFTER successful payment
+    const insertResult = await client.query(
+      'INSERT INTO students (name, email, phone, course, amount, payment_id, payment_status) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id',
+      [name, email, phone, course, amount, razorpay_payment_id, 'successful']
+    );
 
-          const student = results[0];
+    const student_id = insertResult.rows[0].id;
 
-          try {
-            // Update Excel file
-            await updateExcelFile(student);
+    // Get complete student details with timestamp
+    const studentResult = await client.query(
+      'SELECT * FROM students WHERE id = $1',
+      [student_id]
+    );
 
-            // Send email notification
-            await sendPaymentConfirmationEmail(student);
-
-            res.json({ status: 'success', message: 'Payment successful and records updated' });
-          } catch (error) {
-            console.error('Error in post-payment processing:', error);
-
-            // Delete the record if Excel or email fails
-            db.query('DELETE FROM students WHERE id = ?', [student_id], (delErr) => {
-              if (delErr) {
-                console.error('Error deleting incomplete record:', delErr);
-              }
-            });
-
-            res.status(500).json({ status: 'error', message: 'Post-payment processing error' });
-          }
-        }
-      );
+    if (studentResult.rows.length === 0) {
+      throw new Error('Error fetching student details');
     }
-  );
+
+    const student = studentResult.rows[0];
+
+    // Update Excel file
+    await updateExcelFile(student);
+
+    // Send email notification
+    await sendPaymentConfirmationEmail(student);
+
+    await client.query('COMMIT');
+
+    res.json({ status: 'success', message: 'Payment successful and records updated' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error in post-payment processing:', error);
+    res.status(500).json({ status: 'error', message: 'Post-payment processing error' });
+  } finally {
+    client.release();
+  }
 });
 
 // Contact form submission handler
@@ -351,50 +339,46 @@ app.post('/submit-contact', async (req, res) => {
     return res.status(400).json({ error: 'Name, email, subject, and message are required' });
   }
 
+  const client = await pool.connect();
+
   try {
+    await client.query('BEGIN');
+
     // Insert into database
-    db.query(
-      'INSERT INTO contact_messages (name, email, phone, subject, message) VALUES (?, ?, ?, ?, ?)',
-      [name, email, phone || '', subject, message],
-      async (err, result) => {
-        if (err) {
-          console.error('Error storing contact message:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
-
-        const messageId = result.insertId;
-
-        // Get complete message details with timestamp
-        db.query(
-          'SELECT * FROM contact_messages WHERE id = ?',
-          [messageId],
-          async (err, results) => {
-            if (err || results.length === 0) {
-              console.error('Error fetching contact message details:', err);
-              return res.status(500).json({ error: 'Error fetching message details' });
-            }
-
-            const contactMessage = results[0];
-
-            try {
-              // Update Excel file
-              await updateContactExcel(contactMessage);
-
-              // Send email notification
-              await sendContactNotificationEmail(contactMessage);
-
-              res.json({ success: true, message: 'Your message has been sent successfully!' });
-            } catch (error) {
-              console.error('Error in contact form processing:', error);
-              res.status(500).json({ error: 'Error processing your message' });
-            }
-          }
-        );
-      }
+    const insertResult = await client.query(
+      'INSERT INTO contact_messages (name, email, phone, subject, message) VALUES ($1, $2, $3, $4, $5) RETURNING id',
+      [name, email, phone || '', subject, message]
     );
+
+    const messageId = insertResult.rows[0].id;
+
+    // Get complete message details with timestamp
+    const messageResult = await client.query(
+      'SELECT * FROM contact_messages WHERE id = $1',
+      [messageId]
+    );
+
+    if (messageResult.rows.length === 0) {
+      throw new Error('Error fetching contact message details');
+    }
+
+    const contactMessage = messageResult.rows[0];
+
+    // Update Excel file
+    await updateContactExcel(contactMessage);
+
+    // Send email notification
+    await sendContactNotificationEmail(contactMessage);
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: 'Your message has been sent successfully!' });
   } catch (error) {
-    console.error('Error in contact form submission:', error);
-    res.status(500).json({ error: 'Server error' });
+    await client.query('ROLLBACK');
+    console.error('Error in contact form processing:', error);
+    res.status(500).json({ error: 'Error processing your message' });
+  } finally {
+    client.release();
   }
 });
 
@@ -406,50 +390,46 @@ app.post('/submit-about-inquiry', async (req, res) => {
     return res.status(400).json({ error: 'Name, email, subject, and message are required' });
   }
 
+  const client = await pool.connect();
+
   try {
+    await client.query('BEGIN');
+
     // Insert into database
-    db.query(
-      'INSERT INTO about_inquiries (name, email, subject, message) VALUES (?, ?, ?, ?)',
-      [name, email, subject, message],
-      async (err, result) => {
-        if (err) {
-          console.error('Error storing about inquiry:', err);
-          return res.status(500).json({ error: 'Database error' });
-        }
-
-        const inquiryId = result.insertId;
-
-        // Get complete inquiry details with timestamp
-        db.query(
-          'SELECT * FROM about_inquiries WHERE id = ?',
-          [inquiryId],
-          async (err, results) => {
-            if (err || results.length === 0) {
-              console.error('Error fetching about inquiry details:', err);
-              return res.status(500).json({ error: 'Error fetching inquiry details' });
-            }
-
-            const aboutInquiry = results[0];
-
-            try {
-              // Update Excel file
-              await updateAboutExcel(aboutInquiry);
-
-              // Send email notification
-              await sendAboutInquiryEmail(aboutInquiry);
-
-              res.json({ success: true, message: 'Your message has been sent successfully!' });
-            } catch (error) {
-              console.error('Error in about inquiry processing:', error);
-              res.status(500).json({ error: 'Error processing your message' });
-            }
-          }
-        );
-      }
+    const insertResult = await client.query(
+      'INSERT INTO about_inquiries (name, email, subject, message) VALUES ($1, $2, $3, $4) RETURNING id',
+      [name, email, subject, message]
     );
+
+    const inquiryId = insertResult.rows[0].id;
+
+    // Get complete inquiry details with timestamp
+    const inquiryResult = await client.query(
+      'SELECT * FROM about_inquiries WHERE id = $1',
+      [inquiryId]
+    );
+
+    if (inquiryResult.rows.length === 0) {
+      throw new Error('Error fetching about inquiry details');
+    }
+
+    const aboutInquiry = inquiryResult.rows[0];
+
+    // Update Excel file
+    await updateAboutExcel(aboutInquiry);
+
+    // Send email notification
+    await sendAboutInquiryEmail(aboutInquiry);
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: 'Your message has been sent successfully!' });
   } catch (error) {
-    console.error('Error in about inquiry submission:', error);
-    res.status(500).json({ error: 'Server error' });
+    await client.query('ROLLBACK');
+    console.error('Error in about inquiry processing:', error);
+    res.status(500).json({ error: 'Error processing your message' });
+  } finally {
+    client.release();
   }
 });
 
@@ -710,36 +690,36 @@ app.get('/admin', (req, res) => {
 });
 
 // API route to get all students
-app.get('/api/students', (req, res) => {
-  db.query('SELECT * FROM students ORDER BY registration_date DESC', (err, results) => {
-    if (err) {
-      console.error('Error fetching students:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-    res.json(results);
-  });
+app.get('/api/students', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM students ORDER BY registration_date DESC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching students:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // API route to get all contact messages
-app.get('/api/contact-messages', (req, res) => {
-  db.query('SELECT * FROM contact_messages ORDER BY submission_date DESC', (err, results) => {
-    if (err) {
-      console.error('Error fetching contact messages:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-    res.json(results);
-  });
+app.get('/api/contact-messages', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM contact_messages ORDER BY submission_date DESC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching contact messages:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // API route to get all about inquiries
-app.get('/api/about-inquiries', (req, res) => {
-  db.query('SELECT * FROM about_inquiries ORDER BY submission_date DESC', (err, results) => {
-    if (err) {
-      console.error('Error fetching about inquiries:', err);
-      return res.status(500).json({ error: 'Database error' });
-    }
-    res.json(results);
-  });
+app.get('/api/about-inquiries', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM about_inquiries ORDER BY submission_date DESC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching about inquiries:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
 });
 
 // API route to download Excel files
@@ -782,11 +762,13 @@ app.listen(PORT, () => {
 // Graceful shutdown
 process.on('SIGINT', () => {
   console.log('Shutting down gracefully...');
-  db.end((err) => {
-    if (err) {
-      console.error('Error closing database connection:', err);
-    }
-    console.log('Database connection closed');
-    process.exit(0);
-  });
+  pool.end()
+    .then(() => {
+      console.log('Database connection pool closed');
+      process.exit(0);
+    })
+    .catch(err => {
+      console.error('Error closing database connection pool:', err);
+      process.exit(1);
+    });
 });
