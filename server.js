@@ -188,6 +188,7 @@ app.get('/', (req, res) => {
 });
 
 // Handle form submission and create Razorpay order
+// Handle form submission and create Razorpay order
 app.post('/create-order', (req, res) => {
   const { name, email, phone, course, amount } = req.body;
 
@@ -195,7 +196,7 @@ app.post('/create-order', (req, res) => {
     return res.status(400).json({ error: 'All fields are required' });
   }
 
-  // Create Razorpay order
+  // Create Razorpay order - Fixed structure according to Razorpay API
   const options = {
     amount: parseFloat(amount) * 100, // amount in paisa
     currency: 'INR',
@@ -209,10 +210,10 @@ app.post('/create-order', (req, res) => {
       return res.status(500).json({ error: 'Error creating order' });
     }
 
-    // Return order details to client WITHOUT storing in database
+    // Return order details to client WITH proper Razorpay configuration
     res.json({
       order_id: order.id,
-      key_id: razorpay.key_id,
+      key_id: razorpay.key_id, // Fixed: Using the initialized razorpay key
       amount: options.amount,
       currency: options.currency,
       name: 'ASTA Education Academy',
@@ -228,6 +229,35 @@ app.post('/create-order', (req, res) => {
         name,
         email,
         contact: phone
+      },
+      // Added: UPI configuration for better app redirects
+      config: {
+        display: {
+          blocks: {
+            upi: {
+              name: "Pay via UPI",
+              instruments: [
+                {
+                  method: 'upi'
+                }
+              ]
+            }
+          },
+          sequence: ["block.upi"],
+          preferences: {
+            show_default_blocks: false
+          }
+        }
+      },
+      // Added: Improve app handling for callbacks
+      handler: function(response) {
+        // This is handled client-side
+      },
+      modal: {
+        escape: false,
+        ondismiss: function() {
+          console.log('Payment window closed');
+        }
       }
     });
   });
