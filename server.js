@@ -23,6 +23,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use(express.json());
+
 // CORS configuration
 const allowedOrigins = [
   'https://astaphonicsfuns-quickjoins-projects.vercel.app', // ✅ NO trailing slash
@@ -250,12 +252,12 @@ app.post('/create-order', (req, res) => {
         }
       },
       // Added: Improve app handling for callbacks
-      handler: function(response) {
+      handler: function (response) {
         // This is handled client-side
       },
       modal: {
         escape: false,
-        ondismiss: function() {
+        ondismiss: function () {
           console.log('Payment window closed');
         }
       }
@@ -280,7 +282,7 @@ app.post('/verify-payment', (req, res) => {
   // Verify signature
   const body = razorpay_order_id + '|' + razorpay_payment_id;
   const expectedSignature = crypto
-    .createHmac('sha256', razorpay.key_secret)
+    .createHmac('sha256', process.env.RAZORPAY_SECRET)
     .update(body)
     .digest('hex');
 
