@@ -131,7 +131,7 @@ async function initializeTables() {
 // Initialize Razorpay
 const razorpay = new Razorpay({
   key_id: process.env.RAZORPAY_KEY_ID || 'your_razorpay_key_id',
-  key_secret: process.env.RAZORPAY_KEY_SECRET || 'your_razorpay_key_secret'
+  key_secret: process.env.RAZORPAY_SECRET || 'your_razorpay_key_secret'
 });
 
 // Nodemailer configuration
