@@ -27,8 +27,9 @@ app.use(express.json());
 
 // CORS configuration
 const allowedOrigins = [
-  'https://astaphonicsfuns-quickjoins-projects.vercel.app', // ✅ NO trailing slash
-  'http://localhost:5173' // for local dev if needed
+  'https://astaphonicsfuns-quickjoins-projects.vercel.app',
+  'http://localhost:5173',
+  'http://localhost:3000'  // Add any other frontend URLs
 ];
 
 app.use(cors({
@@ -45,11 +46,10 @@ app.use(cors({
 // Middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
-// app.use(express.static('public'));
 
 const { Pool } = pg;
 
-// PostgreSQL Connection
+// PostgreSQL Connection - Using environment variables securely
 const pool = new Pool({
   user: process.env.DB_USER,
   host: process.env.DB_HOST,
@@ -93,6 +93,24 @@ async function initializeTables() {
       )
     `);
     console.log('Students table created or already exists');
+    // Add this near your other table initialization code in initializeTables()
+    await client.query(`
+  CREATE TABLE IF NOT EXISTS lms_content (
+    id SERIAL PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    content_type VARCHAR(50) NOT NULL,
+    file_url TEXT NOT NULL,
+    storage_path TEXT NOT NULL, 
+    file_size BIGINT,
+    file_name VARCHAR(255),
+    created_by VARCHAR(128) NOT NULL,
+    created_by_email VARCHAR(100),
+    firebase_id VARCHAR(128),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+    console.log('LMS content table created or already exists');
 
     // Create contact_messages table if not exists
     await client.query(`
@@ -121,6 +139,19 @@ async function initializeTables() {
     `);
     console.log('About inquiries table created or already exists');
 
+    // Create users table if not exists
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        uid VARCHAR(128) UNIQUE NOT NULL,
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(100) UNIQUE NOT NULL,
+        role VARCHAR(20) NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('Users table created or already exists');
+
   } catch (err) {
     console.error('Error initializing database tables:', err);
   } finally {
@@ -128,18 +159,18 @@ async function initializeTables() {
   }
 }
 
-// Initialize Razorpay
+// Initialize Razorpay - Using environment variables securely
 const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID || 'your_razorpay_key_id',
-  key_secret: process.env.RAZORPAY_SECRET || 'your_razorpay_key_secret'
+  key_id: process.env.RAZORPAY_KEY_ID,
+  key_secret: process.env.RAZORPAY_SECRET
 });
 
-// Nodemailer configuration
+// Nodemailer configuration - Using environment variables securely
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.EMAIL_USER || 'phonicswithshereen@gmail.com',
-    pass: process.env.EMAIL_PASSWORD || 'your_app_password'
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
   }
 });
 
@@ -184,11 +215,6 @@ const initExcelFiles = () => {
 };
 initExcelFiles();
 
-// Routes
-// app.get('/', (req, res) => {
-//   res.sendFile(path.join(__dirname, 'public', 'index.html'));
-// });
-
 // Handle form submission and create Razorpay order
 app.post('/create-order', (req, res) => {
   const { name, email, phone, course, amount } = req.body;
@@ -214,7 +240,7 @@ app.post('/create-order', (req, res) => {
     // Return order details to client WITH proper Razorpay configuration
     res.json({
       order_id: order.id,
-      key_id: razorpay.key_id, // Fixed: Using the initialized razorpay key
+      key_id: process.env.RAZORPAY_KEY_ID, // Using env var instead of direct reference
       amount: options.amount,
       currency: options.currency,
       name: 'ASTA Education Academy',
@@ -251,9 +277,6 @@ app.post('/create-order', (req, res) => {
         }
       },
       // Added: Improve app handling for callbacks
-      handler: function (response) {
-        // This is handled client-side
-      },
       modal: {
         escape: false,
         ondismiss: function () {
@@ -263,11 +286,6 @@ app.post('/create-order', (req, res) => {
     });
   });
 });
-
-// Route for payment page
-// app.get('/payment', (req, res) => {
-//   res.sendFile(path.join(__dirname, 'public', 'payment.html'));
-// });
 
 // Verify payment and update records
 app.post('/verify-payment', async (req, res) => {
@@ -332,6 +350,110 @@ app.post('/verify-payment', async (req, res) => {
     res.status(500).json({ status: 'error', message: 'Post-payment processing error' });
   } finally {
     client.release();
+  }
+});
+
+// API endpoint for user creation - Just the modified endpoint
+app.post('/api/users', async (req, res) => {
+  console.log('Received user creation request:', req.body); // Add logging
+  const { uid, name, email, role } = req.body;
+
+  if (!uid || !name || !email || !role) {
+    console.log('Missing required fields:', { uid, name, email, role });
+    return res.status(400).json({ error: 'All fields are required (uid, name, email, role)' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    // Check if user with this uid already exists
+    const existingUserResult = await client.query(
+      'SELECT * FROM users WHERE uid = $1',
+      [uid]
+    );
+
+    if (existingUserResult.rows.length > 0) {
+      console.log('User already exists with uid:', uid);
+      return res.status(409).json({ error: 'User already exists' });
+    }
+
+    // Insert the new user
+    const insertResult = await client.query(
+      'INSERT INTO users (uid, name, email, role) VALUES ($1, $2, $3, $4) RETURNING id',
+      [uid, name, email, role]
+    );
+
+    await client.query('COMMIT');
+
+    console.log('User created successfully:', { userId: insertResult.rows[0].id });
+    res.status(201).json({
+      success: true,
+      message: 'User created successfully',
+      userId: insertResult.rows[0].id
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error creating user:', error);
+    res.status(500).json({ error: 'Error creating user: ' + error.message });
+  } finally {
+    client.release();
+  }
+});
+
+// Add this new endpoint near your other API routes
+app.post('/api/lms/content', async (req, res) => {
+  const {
+    title,
+    description,
+    contentType,
+    fileURL,
+    storagePath,
+    fileSize,
+    fileName,
+    createdBy,
+    createdByEmail,
+    firebaseId
+  } = req.body;
+
+  // Validate required fields
+  if (!title || !contentType || !fileURL || !storagePath || !createdBy) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+
+  const client = await pool.connect();
+
+  try {
+    const result = await client.query(
+      `INSERT INTO lms_content 
+        (title, description, content_type, file_url, storage_path, file_size, file_name, created_by, created_by_email, firebase_id) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
+       RETURNING id`,
+      [title, description, contentType, fileURL, storagePath, fileSize, fileName, createdBy, createdByEmail, firebaseId]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Content uploaded successfully',
+      contentId: result.rows[0].id
+    });
+  } catch (error) {
+    console.error('Error storing content metadata:', error);
+    res.status(500).json({ error: 'Failed to store content metadata' });
+  } finally {
+    client.release();
+  }
+});
+
+// Add endpoint to retrieve content
+app.get('/api/lms/content', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM lms_content ORDER BY created_at DESC');
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching LMS content:', err);
+    res.status(500).json({ error: 'Database error' });
   }
 });
 
@@ -687,11 +809,6 @@ async function sendAboutInquiryEmail(aboutInquiry) {
     });
   });
 }
-
-// Admin dashboard route (protected - in a production app this should have proper authentication)
-// app.get('/admin', (req, res) => {
-//   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
-// });
 
 // API route to get all students
 app.get('/api/students', async (req, res) => {
