@@ -4,11 +4,12 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "build": "npm install --legacy-peer-deps"
   },
   "dependencies": {
     "body-parser": "^2.2.0",
-    "cloudinary": "^2.6.0",
+    "cloudinary": "^1.30.0",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.4.7",
