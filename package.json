@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "body-parser": "^2.2.0",
-    "cloudinary": "^1.30.0",
+    "cloudinary": "^1.41.3",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "dotenv": "^16.4.7",
