@@ -11,6 +11,9 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import cors from "cors";
+import cloudinary from "cloudinary/v2";
+import multer from "multer";
+import { CloudinaryStorage } from "multer-storage-cloudinary";
 
 // Configure dotenv
 dotenv.config();
@@ -46,6 +49,47 @@ app.use(cors({
 // Middleware
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(bodyParser.json());
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+  secure: true
+});
+
+// Configure multer storage with Cloudinary
+const storage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'asta_education_content',
+    resource_type: 'auto',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'pdf', 'docx', 'doc', 'pptx', 'mp4'],
+  },
+});
+
+// Create multer upload instance
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  fileFilter: (req, file, cb) => {
+    // Check if file type is allowed
+    const allowedMimeTypes = [
+      'image/jpeg', 'image/jpg', 'image/png',
+      'application/pdf',
+      'video/mp4',
+      'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/msword'
+    ];
+
+    if (allowedMimeTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPEG, JPG, PNG, PDF, Word, PowerPoint, or MP4 files are allowed.'), false);
+    }
+  }
+});
 
 const { Pool } = pg;
 
@@ -402,7 +446,92 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-// Add this new endpoint near your other API routes
+// New endpoint for file upload to Cloudinary
+app.post('/api/lms/upload', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: 'No file uploaded' });
+    }
+
+    // The file has been uploaded to Cloudinary via the multer storage
+    const { title, description, createdBy, createdByEmail } = req.body;
+    const fileURL = req.file.path; // Cloudinary URL
+
+    // Get content type based on original mimetype
+    let contentType;
+    switch (req.file.mimetype) {
+      case 'image/jpeg':
+      case 'image/jpg':
+      case 'image/png':
+        contentType = 'image';
+        break;
+      case 'application/pdf':
+        contentType = 'pdf';
+        break;
+      case 'video/mp4':
+        contentType = 'video';
+        break;
+      case 'application/vnd.openxmlformats-officedocument.presentationml.presentation':
+        contentType = 'ppt';
+        break;
+      case 'application/vnd.openxmlformats-officedocument.wordprocessingml.document':
+      case 'application/msword':
+        contentType = 'word';
+        break;
+      default:
+        contentType = 'other';
+    }
+
+    // Store metadata in PostgreSQL
+    const client = await pool.connect();
+    try {
+      const result = await client.query(
+        `INSERT INTO lms_content 
+          (title, description, content_type, file_url, storage_path, file_size, file_name, created_by, created_by_email) 
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+         RETURNING id`,
+        [
+          title,
+          description,
+          contentType,
+          fileURL,
+          req.file.path, // Using path as storage identifier
+          req.file.size,
+          req.file.originalname,
+          createdBy,
+          createdByEmail
+        ]
+      );
+
+      res.status(201).json({
+        success: true,
+        message: 'Content uploaded successfully',
+        contentId: result.rows[0].id,
+        fileURL: fileURL
+      });
+    } catch (error) {
+      console.error('Error storing content metadata:', error);
+
+      // Clean up Cloudinary on database failure
+      try {
+        // Extract public_id from URL
+        const publicId = req.file.filename || req.file.public_id;
+        await cloudinary.uploader.destroy(publicId);
+      } catch (cleanupError) {
+        console.error('Error cleaning up Cloudinary resource:', cleanupError);
+      }
+
+      res.status(500).json({ error: 'Failed to store content metadata' });
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    console.error('Error uploading file:', error);
+    res.status(500).json({ error: 'Error uploading file: ' + error.message });
+  }
+});
+
+// Add this new endpoint near your other API routes - replaced with the new upload endpoint above
 app.post('/api/lms/content', async (req, res) => {
   const {
     title,
@@ -749,15 +878,16 @@ async function sendContactNotificationEmail(contactMessage) {
       subject: `New Contact Form Submission: ${contactMessage.subject}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
-          <h2 style="color: #4b0082; text-align: center;">New Contact Form Submission</h2>
+         <h2 style="color: #4b0082; text-align: center;">New Contact Form Submission</h2>
+          <p><strong>Name:</strong> ${contactMessage.name}</p>
+          <p><strong>Email:</strong> ${contactMessage.email}</p>
+          <p><strong>Phone:</strong> ${contactMessage.phone || 'Not provided'}</p>
+          <p><strong>Subject:</strong> ${contactMessage.subject}</p>
+          <p><strong>Message:</strong></p>
           <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
-            <p><strong>Name:</strong> ${contactMessage.name}</p>
-            <p><strong>Email:</strong> ${contactMessage.email}</p>
-            <p><strong>Phone:</strong> ${contactMessage.phone || 'Not provided'}</p>
-            <p><strong>Subject:</strong> ${contactMessage.subject}</p>
-            <p><strong>Message:</strong> ${contactMessage.message}</p>
-            <p><strong>Submission Date:</strong> ${new Date(contactMessage.submission_date).toLocaleString()}</p>
+            ${contactMessage.message}
           </div>
+          <p>Submitted on: ${new Date(contactMessage.submission_date).toLocaleString()}</p>
         </div>
       `
     };
@@ -776,23 +906,24 @@ async function sendContactNotificationEmail(contactMessage) {
 }
 
 // Function to send about inquiry notification email
-async function sendAboutInquiryEmail(aboutInquiry) {
+async function sendAboutInquiryEmail(inquiry) {
   return new Promise((resolve, reject) => {
     // Prepare email content
     const mailOptions = {
       from: process.env.EMAIL_USER,
       to: process.env.EMAIL_USER, // Send to admin
-      subject: `New About Page Inquiry: ${aboutInquiry.subject}`,
+      subject: `New About Page Inquiry: ${inquiry.subject}`,
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
           <h2 style="color: #4b0082; text-align: center;">New About Page Inquiry</h2>
+          <p><strong>Name:</strong> ${inquiry.name}</p>
+          <p><strong>Email:</strong> ${inquiry.email}</p>
+          <p><strong>Subject:</strong> ${inquiry.subject}</p>
+          <p><strong>Message:</strong></p>
           <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
-            <p><strong>Name:</strong> ${aboutInquiry.name}</p>
-            <p><strong>Email:</strong> ${aboutInquiry.email}</p>
-            <p><strong>Subject:</strong> ${aboutInquiry.subject}</p>
-            <p><strong>Message:</strong> ${aboutInquiry.message}</p>
-            <p><strong>Submission Date:</strong> ${new Date(aboutInquiry.submission_date).toLocaleString()}</p>
+            ${inquiry.message}
           </div>
+          <p>Submitted on: ${new Date(inquiry.submission_date).toLocaleString()}</p>
         </div>
       `
     };
@@ -810,18 +941,18 @@ async function sendAboutInquiryEmail(aboutInquiry) {
   });
 }
 
-// API route to get all students
+// Get all students
 app.get('/api/students', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM students ORDER BY registration_date DESC');
     res.json(result.rows);
   } catch (err) {
-    console.error('Error fetching students:', err);
+    console.error('Error fetching student data:', err);
     res.status(500).json({ error: 'Database error' });
   }
 });
 
-// API route to get all contact messages
+// Get all contact messages
 app.get('/api/contact-messages', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM contact_messages ORDER BY submission_date DESC');
@@ -832,7 +963,7 @@ app.get('/api/contact-messages', async (req, res) => {
   }
 });
 
-// API route to get all about inquiries
+// Get all about inquiries
 app.get('/api/about-inquiries', async (req, res) => {
   try {
     const result = await pool.query('SELECT * FROM about_inquiries ORDER BY submission_date DESC');
@@ -843,53 +974,121 @@ app.get('/api/about-inquiries', async (req, res) => {
   }
 });
 
-// API route to download Excel files
-app.get('/api/download/:file', (req, res) => {
-  const { file } = req.params;
-  let filePath;
+// Delete LMS content endpoint
+app.delete('/api/lms/content/:id', async (req, res) => {
+  const contentId = req.params.id;
+  const client = await pool.connect();
 
-  switch (file) {
-    case 'students':
-      filePath = excelFilePath;
-      break;
-    case 'contact':
-      filePath = contactExcelPath;
-      break;
-    case 'about':
-      filePath = aboutExcelPath;
-      break;
-    default:
-      return res.status(404).json({ error: 'File not found' });
-  }
+  try {
+    await client.query('BEGIN');
 
-  if (fs.existsSync(filePath)) {
-    res.download(filePath);
-  } else {
-    res.status(404).json({ error: 'File not found' });
+    // First, get the content information to access the Cloudinary path
+    const contentResult = await client.query(
+      'SELECT * FROM lms_content WHERE id = $1',
+      [contentId]
+    );
+
+    if (contentResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Content not found' });
+    }
+
+    const content = contentResult.rows[0];
+
+    // Extract public ID from Cloudinary URL
+    // The URL looks like: https://res.cloudinary.com/cloud_name/image/upload/v1234567890/folder/file.jpg
+    // We need to extract the 'folder/file.jpg' part which is the public ID
+    try {
+      const urlParts = content.file_url.split('/');
+      const uploadIndex = urlParts.indexOf('upload');
+
+      if (uploadIndex !== -1 && uploadIndex < urlParts.length - 2) {
+        // Extract the public ID (everything after the /upload/vXXXXXXX/ part)
+        const publicIdParts = urlParts.slice(uploadIndex + 2);
+        const publicId = publicIdParts.join('/');
+
+        // Delete from Cloudinary
+        await cloudinary.uploader.destroy(publicId);
+      }
+    } catch (cloudinaryError) {
+      console.error('Error deleting from Cloudinary:', cloudinaryError);
+      // Continue with database deletion even if Cloudinary delete fails
+    }
+
+    // Now delete from database
+    await client.query(
+      'DELETE FROM lms_content WHERE id = $1',
+      [contentId]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: 'Content deleted successfully' });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('Error deleting content:', error);
+    res.status(500).json({ error: 'Error deleting content' });
+  } finally {
+    client.release();
   }
 });
 
-// Error handling middleware
-app.use((err, req, res, next) => {
-  console.error('Server error:', err);
-  res.status(500).json({ error: 'Internal server error' });
+// Get users endpoint with filtering
+app.get('/api/users', async (req, res) => {
+  const { role } = req.query;
+  let query = 'SELECT * FROM users';
+  const params = [];
+
+  if (role) {
+    query += ' WHERE role = $1';
+    params.push(role);
+  }
+
+  query += ' ORDER BY created_at DESC';
+
+  try {
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Error fetching users:', err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date(),
+    uptime: process.uptime()
+  });
+});
+
+// Serve the Excel files if needed (e.g., for admin download)
+app.get('/api/download/students', (req, res) => {
+  if (fs.existsSync(excelFilePath)) {
+    res.download(excelFilePath);
+  } else {
+    res.status(404).json({ error: 'Students data file not found' });
+  }
+});
+
+app.get('/api/download/contact-messages', (req, res) => {
+  if (fs.existsSync(contactExcelPath)) {
+    res.download(contactExcelPath);
+  } else {
+    res.status(404).json({ error: 'Contact messages file not found' });
+  }
+});
+
+app.get('/api/download/about-inquiries', (req, res) => {
+  if (fs.existsSync(aboutExcelPath)) {
+    res.download(aboutExcelPath);
+  } else {
+    res.status(404).json({ error: 'About inquiries file not found' });
+  }
 });
 
 // Start server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-  console.log('Shutting down gracefully...');
-  pool.end()
-    .then(() => {
-      console.log('Database connection pool closed');
-      process.exit(0);
-    })
-    .catch(err => {
-      console.error('Error closing database connection pool:', err);
-      process.exit(1);
-    });
 });
