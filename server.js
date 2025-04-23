@@ -11,7 +11,7 @@ import crypto from "crypto";
 import dotenv from "dotenv";
 import { fileURLToPath } from "url";
 import cors from "cors";
-import cloudinary from "cloudinary/v2";
+import { v2 as cloudinary } from 'cloudinary';
 import multer from "multer";
 import { CloudinaryStorage } from "multer-storage-cloudinary";
 
