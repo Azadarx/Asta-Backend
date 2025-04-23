@@ -1062,6 +1062,58 @@ app.get('/health', (req, res) => {
     uptime: process.uptime()
   });
 });
+// Add this route to your server.js file
+
+// Welcome email endpoint for newly created users
+app.post('/api/send-welcome-email', async (req, res) => {
+  const { name, email, password } = req.body;
+
+  if (!name || !email || !password) {
+    return res.status(400).json({ error: 'Missing required fields for welcome email' });
+  }
+
+  try {
+    // Prepare welcome email content
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: email,
+      subject: 'Welcome to ASTA Education LMS',
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+          <h2 style="color: #4b0082; text-align: center;">Welcome to ASTA Education LMS</h2>
+          <p>Dear ${name},</p>
+          <p>Your account has been created successfully!</p>
+          <div style="background-color: #f9f9f9; padding: 15px; border-radius: 5px; margin: 15px 0;">
+            <h3 style="margin-top: 0; color: #4b0082;">Your Login Details:</h3>
+            <p><strong>Email:</strong> ${email}</p>
+            <p><strong>Password:</strong> ${password}</p>
+          </div>
+          <p>You can log in to your LMS now, happy learning!</p>
+          <p>We recommend changing your password after your first login.</p>
+          <p>Best regards,<br>ASTA Education Academy Team</p>
+        </div>
+      `
+    };
+
+    // Send email
+    await new Promise((resolve, reject) => {
+      transporter.sendMail(mailOptions, (error, info) => {
+        if (error) {
+          console.error('Error sending welcome email:', error);
+          reject(error);
+        } else {
+          console.log('Welcome email sent:', info.response);
+          resolve(info);
+        }
+      });
+    });
+
+    res.status(200).json({ success: true, message: 'Welcome email sent successfully' });
+  } catch (error) {
+    console.error('Error in welcome email processing:', error);
+    res.status(500).json({ error: 'Error sending welcome email' });
+  }
+});
 
 // Serve the Excel files if needed (e.g., for admin download)
 app.get('/api/download/students', (req, res) => {
