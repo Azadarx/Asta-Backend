@@ -536,18 +536,18 @@ app.post('/api/lms/content', async (req, res) => {
   const {
     title,
     description,
-    contentType,
-    fileURL,
-    storagePath,
-    fileSize,
+    fileUrl,
     fileName,
+    fileSize,
+    contentType,
+    fileType,
+    createdAt,
     createdBy,
     createdByEmail,
     firebaseId
   } = req.body;
 
-  // Validate required fields
-  if (!title || !contentType || !fileURL || !storagePath || !createdBy) {
+  if (!title || !fileUrl || !contentType || !createdBy || !firebaseId) {
     return res.status(400).json({ error: 'Missing required fields' });
   }
 
