@@ -455,7 +455,7 @@ app.post('/api/lms/upload', upload.single('file'), async (req, res) => {
 
     // The file has been uploaded to Cloudinary via the multer storage
     const { title, description, createdBy, createdByEmail } = req.body;
-    const fileURL = req.file.path; // Cloudinary URL
+    const fileUrl = req.file.path; // Cloudinary URL
 
     // Get content type based on original mimetype
     let contentType;
@@ -546,6 +546,7 @@ app.post('/api/lms/content', async (req, res) => {
     createdByEmail,
     firebaseId
   } = req.body;
+
 
   if (!title || !fileUrl || !contentType || !createdBy || !firebaseId) {
     return res.status(400).json({ error: 'Missing required fields' });
