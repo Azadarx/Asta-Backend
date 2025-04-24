@@ -532,11 +532,12 @@ app.post('/api/lms/upload', upload.single('file'), async (req, res) => {
 });
 
 // Add this new endpoint near your other API routes - replaced with the new upload endpoint above
+// Add this new endpoint near your other API routes
 app.post('/api/lms/content', async (req, res) => {
   const {
     title,
     description,
-    fileUrl,
+    fileUrl,  // Changed from fileURL to fileUrl to match frontend
     fileName,
     fileSize,
     contentType,
@@ -547,9 +548,14 @@ app.post('/api/lms/content', async (req, res) => {
     firebaseId
   } = req.body;
 
+  // Validate required fields
+  const requiredFields = ['title', 'fileUrl', 'contentType', 'createdBy', 'firebaseId'];
+  const missingFields = requiredFields.filter(field => !req.body[field]);
 
-  if (!title || !fileUrl || !contentType || !createdBy || !firebaseId) {
-    return res.status(400).json({ error: 'Missing required fields' });
+  if (missingFields.length > 0) {
+    return res.status(400).json({ 
+      error: `Missing required fields: ${missingFields.join(', ')}` 
+    });
   }
 
   const client = await pool.connect();
@@ -560,9 +566,22 @@ app.post('/api/lms/content', async (req, res) => {
         (title, description, content_type, file_url, storage_path, file_size, file_name, created_by, created_by_email, firebase_id) 
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
        RETURNING id`,
-      [title, description, contentType, fileURL, storagePath, fileSize, fileName, createdBy, createdByEmail, firebaseId]
+      [
+        title, 
+        description || '', 
+        contentType, 
+        fileUrl,          // Changed from fileURL to fileUrl
+        fileUrl,          // Using fileUrl as storage_path since that's what you need
+        fileSize || 0, 
+        fileName || '', 
+        createdBy, 
+        createdByEmail || '', 
+        firebaseId
+      ]
     );
 
+    console.log('Content uploaded successfully:', result.rows[0]);
+    
     res.status(201).json({
       success: true,
       message: 'Content uploaded successfully',
@@ -570,7 +589,7 @@ app.post('/api/lms/content', async (req, res) => {
     });
   } catch (error) {
     console.error('Error storing content metadata:', error);
-    res.status(500).json({ error: 'Failed to store content metadata' });
+    res.status(500).json({ error: 'Failed to store content metadata: ' + error.message });
   } finally {
     client.release();
   }
