@@ -31,8 +31,9 @@ app.use(express.json());
 // CORS configuration
 const allowedOrigins = [
   'https://asta-frontend-quickjoins-projects.vercel.app/',
+  'https://astaphonicsfuns-quickjoins-projects.vercel.app', // 👈 ADD this line
   'http://localhost:5173',
-  'http://localhost:3000'  // Add any other frontend URLs
+  'http://localhost:3000'
 ];
 
 app.use(cors({
@@ -553,8 +554,8 @@ app.post('/api/lms/content', async (req, res) => {
   const missingFields = requiredFields.filter(field => !req.body[field]);
 
   if (missingFields.length > 0) {
-    return res.status(400).json({ 
-      error: `Missing required fields: ${missingFields.join(', ')}` 
+    return res.status(400).json({
+      error: `Missing required fields: ${missingFields.join(', ')}`
     });
   }
 
@@ -567,21 +568,21 @@ app.post('/api/lms/content', async (req, res) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) 
        RETURNING id`,
       [
-        title, 
-        description || '', 
-        contentType, 
+        title,
+        description || '',
+        contentType,
         fileUrl,          // Changed from fileURL to fileUrl
         fileUrl,          // Using fileUrl as storage_path since that's what you need
-        fileSize || 0, 
-        fileName || '', 
-        createdBy, 
-        createdByEmail || '', 
+        fileSize || 0,
+        fileName || '',
+        createdBy,
+        createdByEmail || '',
         firebaseId
       ]
     );
 
     console.log('Content uploaded successfully:', result.rows[0]);
-    
+
     res.status(201).json({
       success: true,
       message: 'Content uploaded successfully',
