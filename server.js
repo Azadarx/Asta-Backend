@@ -30,7 +30,7 @@ app.use(express.json());
 
 // CORS configuration
 const allowedOrigins = [
-  'https://astaphonicsfuns-quickjoins-projects.vercel.app',
+  'https://asta-frontend-quickjoins-projects.vercel.app/',
   'http://localhost:5173',
   'http://localhost:3000'  // Add any other frontend URLs
 ];
