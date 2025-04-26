@@ -261,31 +261,37 @@ const initExcelFiles = () => {
 initExcelFiles();
 
 // Handle form submission and create Razorpay order
-app.post('/create-order', (req, res) => {
-  const { name, email, phone, course, amount } = req.body;
+// Handle form submission and create Razorpay order
+app.post('/create-order', async (req, res) => {
+  try {
+    const { name, email, phone, course, amount } = req.body;
 
-  if (!name || !email || !phone || !course || !amount) {
-    return res.status(400).json({ error: 'All fields are required' });
-  }
-
-  // Create Razorpay order - Fixed structure according to Razorpay API
-  const options = {
-    amount: parseFloat(amount) * 100, // amount in paisa
-    currency: 'INR',
-    receipt: `receipt_${Date.now()}`,
-    payment_capture: 1
-  };
-
-  razorpay.orders.create(options, (err, order) => {
-    if (err) {
-      console.error('Error creating Razorpay order:', err);
-      return res.status(500).json({ error: 'Error creating order' });
+    // Improved validation
+    if (!name || !email || !phone || !course || !amount) {
+      return res.status(400).json({ error: 'All fields are required' });
     }
+
+    // Parse amount properly - ensure it's a valid number
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      return res.status(400).json({ error: 'Invalid amount value' });
+    }
+
+    // Create Razorpay order with proper amount conversion to paisa
+    const options = {
+      amount: Math.round(parsedAmount * 100), // amount in paisa with proper rounding
+      currency: 'INR',
+      receipt: `receipt_${Date.now()}`,
+      payment_capture: 1
+    };
+
+    // Use async/await for better error handling
+    const order = await razorpay.orders.create(options);
 
     // Return order details to client WITH proper Razorpay configuration
     res.json({
       order_id: order.id,
-      key_id: process.env.RAZORPAY_KEY_ID, // Using env var instead of direct reference
+      key_id: process.env.RAZORPAY_KEY_ID,
       amount: options.amount,
       currency: options.currency,
       name: 'ASTA Education Academy',
@@ -295,14 +301,14 @@ app.post('/create-order', (req, res) => {
         email,
         phone,
         course,
-        amount
+        amount: parsedAmount // Store the original amount, not in paisa
       },
       prefill: {
         name,
         email,
         contact: phone
       },
-      // Added: UPI configuration for better app redirects
+      // UPI configuration for better app redirects
       config: {
         display: {
           blocks: {
@@ -321,7 +327,7 @@ app.post('/create-order', (req, res) => {
           }
         }
       },
-      // Added: Improve app handling for callbacks
+      // Improved app handling for callbacks
       modal: {
         escape: false,
         ondismiss: function () {
@@ -329,7 +335,21 @@ app.post('/create-order', (req, res) => {
         }
       }
     });
-  });
+  } catch (err) {
+    console.error('Error creating Razorpay order:', err);
+
+    // More detailed error response
+    if (err.error && err.error.description) {
+      return res.status(400).json({
+        error: 'Razorpay error: ' + err.error.description
+      });
+    }
+
+    return res.status(500).json({
+      error: 'Error creating order',
+      details: err.message
+    });
+  }
 });
 
 // Verify payment and update records
