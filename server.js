@@ -420,7 +420,7 @@ app.post('/verify-payment', async (req, res) => {
 
 // API endpoint for user creation - Just the modified endpoint
 app.post('/api/users', async (req, res) => {
-  console.log('Received user creation request:', req.body); // Add logging
+  console.log('Received user creation request:', req.body);
   const { uid, name, email, role } = req.body;
 
   if (!uid || !name || !email || !role) {
@@ -433,14 +433,14 @@ app.post('/api/users', async (req, res) => {
   try {
     await client.query('BEGIN');
 
-    // Check if user with this uid already exists
+    // Check if user with this uid or email already exists
     const existingUserResult = await client.query(
-      'SELECT * FROM users WHERE uid = $1',
-      [uid]
+      'SELECT * FROM users WHERE uid = $1 OR email = $2',
+      [uid, email]
     );
 
     if (existingUserResult.rows.length > 0) {
-      console.log('User already exists with uid:', uid);
+      console.log('User already exists with uid or email:', { uid, email });
       return res.status(409).json({ error: 'User already exists' });
     }
 
@@ -466,6 +466,7 @@ app.post('/api/users', async (req, res) => {
     client.release();
   }
 });
+
 
 // New endpoint for file upload to Cloudinary
 app.post('/api/lms/upload', upload.single('file'), async (req, res) => {
